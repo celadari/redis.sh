@@ -40,7 +40,7 @@ REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 REDIS_DB="${REDIS_DB:-0}"
 REDIS_ARRAY_RANGE="0,-1"
-
+REDIS_WIPEOUT=""
 
 function redis_read_str() {
         typeset REDIS_STR="$@"
@@ -179,7 +179,16 @@ function redis_set_hash() {
         printf %b "*4\r\n\$4\r\nHSET\r\n\$${#redis_key}\r\n$redis_key\r\n\$${#redis_field}\r\n$redis_field\r\n\$${#redis_value}\r\n$redis_value\r\n"
 }
 
-while getopts g:s:r:P:H:p:d:f:ha opt; do
+function redis_wipeout_all() {
+  printf %b "*1\r\n\$7\r\nFLUSHDB\r\n"
+}
+
+function redis_wipeout() {
+  typeset redis_key="$1"
+  printf %b "*2\r\n\$3\r\DEL\r\n\$${#redis_key}\r\n$redis_key\r\n"
+}
+
+while getopts g:s:r:P:H:p:d:f:ha:w:W opt; do
 	case $opt in
 		p)
 			REDIS_PW=${OPTARG}
@@ -211,18 +220,24 @@ while getopts g:s:r:P:H:p:d:f:ha opt; do
     d)
 			REDIS_DB=${OPTARG}
 			;;
+	  w)
+	    REDIS_WIPEOUT=${OPTARG}
+	    ;;
+	  W)
+	    REDIS_WIPEOUT="*"
+	    ;;
 		*)
 			echo
 			echo USAGE:
-			echo "	$0 [-a|-h] [-r <range>] [-s <var>] [-g <var>] [-f <field>] [-p <password>] [-d <database_number>] [-H <hostname>] [-P <port>]"
+			echo "	$0 [-a|-h] [-W] [-w <var>] [-r <range>] [-s <var>] [-g <var>] [-f <field>] [-p <password>] [-d <database_number>] [-H <hostname>] [-P <port>]"
 			echo
 			exit 1
 			;;
 	esac
 done
 
-if [[ -z $REDIS_GET ]] && [[ -z $REDIS_SET ]]; then
-	echo "You must either GET(-g) or SET(-s)" >&2
+if [[ -z $REDIS_GET ]] && [[ -z $REDIS_SET ]] && [[ -z $REDIS_WIPEOUT ]]; then
+	echo "You must either GET(-g) or SET(-s) or WIPEOUT(-W, -w)" >&2
 	exit 1
 fi
 
@@ -239,6 +254,17 @@ redis_read $FD 1>/dev/null 2>&1
 if [[ ! -z $REDIS_PW ]]; then
 	redis_compose_cmd "$REDIS_PW" >&$FD
     redis_read $FD 1>/dev/null 2>&1
+fi
+
+if [[ ! -z $REDIS_WIPEOUT ]]; then
+  if [[ "*" == $REDIS_WIPEOUT ]] ; then
+    redis_wipeout_all >&$FD
+  else
+    redis_wipeout "$REDIS_WIPEOUT" >&$FD
+  fi
+
+  exec {FD}>&-
+  exit 0
 fi
 
 if [[ ! -z $REDIS_GET ]]; then
